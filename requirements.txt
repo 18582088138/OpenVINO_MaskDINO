@@ -6,3 +6,7 @@ h5py
 submitit
 scikit-image
 opencv-python
+
+torch>=2.0
+torchvision
+openvino

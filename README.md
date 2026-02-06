@@ -1,4 +1,4 @@
-Mask DINO <img src="figures/dinosaur.png" width="30">
+[OpenVINO Enable] Mask DINO <img src="figures/dinosaur.png" width="30">
 ========
 [![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/mask-dino-towards-a-unified-transformer-based-1/panoptic-segmentation-on-coco-minival)](https://paperswithcode.com/sota/panoptic-segmentation-on-coco-minival?p=mask-dino-towards-a-unified-transformer-based-1)
 [![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/mask-dino-towards-a-unified-transformer-based-1/panoptic-segmentation-on-coco-test-dev)](https://paperswithcode.com/sota/panoptic-segmentation-on-coco-test-dev?p=mask-dino-towards-a-unified-transformer-based-1)
@@ -16,6 +16,8 @@ Framework for Object Detection and Segmentation](https://arxiv.org/abs/2206.0277
 
 <details open>
 <summary> <font size=8><strong>News</strong></font> </summary>
+
+[2026/2] **OpenVINO enable MaskDINO on Intel CPU/GPU platform.**
 
 [2023/7] We release [Semantic-SAM](https://github.com/UX-Decoder/Semantic-SAM), a universal image segmentation model to enable segment and recognize anything at any desired granularity. **Code** and **checkpoint** are available!
 
@@ -70,6 +72,9 @@ See [installation instructions](INSTALL.md).
 
 
 ## Getting Started
+
+See [OpenVINO Enable MaskDINO & Inference Demo](OV_README.md)
+
 See [Inference Demo with Pre-trained Model](demo/README.md)
 
 See [Results](#results).
