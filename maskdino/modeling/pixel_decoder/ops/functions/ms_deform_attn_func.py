@@ -31,6 +31,17 @@ except ModuleNotFoundError as e:
 
 class MSDeformAttnFunction(Function):
     @staticmethod
+    def symbolic(g, value, value_spatial_shapes, value_level_start_index, sampling_locations, attention_weights, im2col_step):
+        return g.op("MSDeformAttnFunction", 
+                    value, 
+                    value_spatial_shapes, 
+                    value_level_start_index, 
+                    sampling_locations, 
+                    attention_weights, 
+                    im2col_step=im2col_step,
+                    outputs=1)  # Specify the number of outputs if needed
+
+    @staticmethod
     def forward(ctx, value, value_spatial_shapes, value_level_start_index, sampling_locations, attention_weights, im2col_step):
         ctx.im2col_step = im2col_step
         output = MSDA.ms_deform_attn_forward(
