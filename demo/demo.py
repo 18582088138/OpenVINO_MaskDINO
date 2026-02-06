@@ -70,12 +70,35 @@ def get_parser():
         default=0.5,
         help="Minimum score for instance predictions to be shown",
     )
+
     parser.add_argument(
         "--opts",
         help="Modify config options using the command-line 'KEY VALUE' pairs",
         default=[],
         nargs=argparse.REMAINDER,
     )
+
+    # Newly added arguments for OpenVINO and ONNX export
+    parser.add_argument(
+        "--ov-infer",
+        action="store_true",
+        help="Use OpenVINO for inference (default: False)."
+    )
+
+    parser.add_argument(
+        "--ov-device",
+        type=str,
+        default="CPU",
+        choices=["CPU", "GPU", "AUTO", "MULTI"],
+        help="Device to run OpenVINO inference on (default: CPU)."
+    )
+
+    parser.add_argument(
+        "--onnx-export",
+        action="store_true",
+        help="Export the model to ONNX format before running inference (default: False)."
+    )
+
     return parser
 
 
@@ -105,7 +128,20 @@ if __name__ == "__main__":
 
     cfg = setup_cfg(args)
 
-    demo = VisualizationDemo(cfg)
+    ov_infer = args.ov_infer
+    ov_device = args.ov_device
+    onnx_export_flag = args.onnx_export
+    
+
+    demo = VisualizationDemo(cfg, ov_infer=ov_infer, ov_device=ov_device)
+    if ov_infer :
+        onnx_export_flag = False # Skip ONNX export if using OpenVINO
+
+    if onnx_export_flag:
+        input = glob.glob(os.path.expanduser(args.input[0]))
+        tmp_img = read_image(input[0],format="BGR")
+        tmp_demo = VisualizationDemo(cfg)
+        tmp_demo.export_onnx(tmp_img)
 
     if args.input:
         if len(args.input) == 1:
@@ -114,8 +150,12 @@ if __name__ == "__main__":
         for path in tqdm.tqdm(args.input, disable=not args.output):
             # use PIL, to be consistent with evaluation
             img = read_image(path, format="BGR")
+            print("[Debug] input img shape:", img.shape)
             start_time = time.time()
-            predictions, visualized_output = demo.run_on_image(img)
+            if ov_infer:
+                predictions, visualized_output = demo.ov_run_on_image(img)
+            else:
+                predictions, visualized_output = demo.run_on_image(img)
             logger.info(
                 "{}: {} in {:.2f}s".format(
                     path,
