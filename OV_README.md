@@ -23,21 +23,21 @@ sh make.sh
 
 ## Step 2. conda environment setup 
 ```bash
-conda create --name maskdino python=3.12 -y
+conda create --name ov_maskdino python=3.12 -y
 conda activate ov_maskdino
-pip install -r requirements.txt
+pip install torch torchvision opencv-python
 
 # under your working directory
-cd <WORKING_RDIR>
+cd <WORKING_DIR>
 git clone -b ov_enable https://github.com/18582088138/openvino_detectron2.git
-cd detectron2
-pip install -e .
+cd openvino_detectron2
+pip install -e . --no-build-isolation
 pip install git+https://github.com/cocodataset/panopticapi.git
 pip install git+https://github.com/mcordts/cityscapesScripts.git
 
-cd <WORKING_RDIR>
-git clone -b https://github.com/18582088138/OpenVINO_MaskDINO.git
-cd MaskDINO
+cd <WORKING_DIR>
+git clone -b ov_maskdino https://github.com/18582088138/OpenVINO_MaskDINO.git
+cd OpenVINO_MaskDINO
 pip install -r requirements.txt
 cd maskdino/modeling/pixel_decoder/ops
 sh make.sh
