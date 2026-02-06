@@ -111,8 +111,6 @@ class MaskDINO(nn.Module):
         if not self.semantic_on:
             assert self.sem_seg_postprocess_before_inference
 
-        print('criterion.weight_dict ', self.criterion.weight_dict)
-
     @classmethod
     def from_config(cls, cfg):
         backbone = build_backbone(cfg)
@@ -245,12 +243,15 @@ class MaskDINO(nn.Module):
                     segments_info (list[dict]): Describe each segment in `panoptic_seg`.
                         Each dict contains keys "id", "category_id", "isthing".
         """
+        
         images = [x["image"].to(self.device) for x in batched_inputs]
         images = [(x - self.pixel_mean) / self.pixel_std for x in images]
         images = ImageList.from_tensors(images, self.size_divisibility)
+        # breakpoint()
 
         features = self.backbone(images.tensor)
-
+        print("[Debug] feature shape:", features.keys(), {k: v.shape for k, v in features.items()})
+        # 
         if self.training:
             # dn_args={"scalar":30,"noise_scale":0.4}
             # mask classification target
@@ -292,44 +293,233 @@ class MaskDINO(nn.Module):
             for mask_cls_result, mask_pred_result, mask_box_result, input_per_image, image_size in zip(
                 mask_cls_results, mask_pred_results, mask_box_results, batched_inputs, images.image_sizes
             ):  # image_size is augmented size, not divisible to 32
-                height = input_per_image.get("height", image_size[0])  # real size
-                width = input_per_image.get("width", image_size[1])
+                # print("[Debug] image_size:", image_size)                # [(1194, 800)]
+                # print("[Debug] input_per_image keys:", input_per_image.keys())
+                
+                height = input_per_image.get("height", image_size[0])  # 639   real size
+                width = input_per_image.get("width", image_size[1])    # 428
                 processed_results.append({})
-                new_size = mask_pred_result.shape[-2:]  # padded size (divisible to 32)
+                new_size = mask_pred_result.shape[-2:]  # padded size (divisible to 32) # ([1216, 800])
 
-
-                if self.sem_seg_postprocess_before_inference:
-                    mask_pred_result = retry_if_cuda_oom(sem_seg_postprocess)(
+                if self.sem_seg_postprocess_before_inference:        # True
+                    mask_pred_result = retry_if_cuda_oom(sem_seg_postprocess)(  # mask_pred_result :([300, 639, 428])
                         mask_pred_result, image_size, height, width
                     )
-                    mask_cls_result = mask_cls_result.to(mask_pred_result)
+                    mask_cls_result = mask_cls_result.to(mask_pred_result)      # mask_cls_result : ([300, 80])
                     # mask_box_result = mask_box_result.to(mask_pred_result)
                     # mask_box_result = self.box_postprocess(mask_box_result, height, width)
 
                 # semantic segmentation inference
-                if self.semantic_on:
+                if self.semantic_on:                                 # False
                     r = retry_if_cuda_oom(self.semantic_inference)(mask_cls_result, mask_pred_result)
                     if not self.sem_seg_postprocess_before_inference:
                         r = retry_if_cuda_oom(sem_seg_postprocess)(r, image_size, height, width)
                     processed_results[-1]["sem_seg"] = r
 
                 # panoptic segmentation inference
-                if self.panoptic_on:
+                if self.panoptic_on:                               # False
                     panoptic_r = retry_if_cuda_oom(self.panoptic_inference)(mask_cls_result, mask_pred_result)
                     processed_results[-1]["panoptic_seg"] = panoptic_r
 
                 # instance segmentation inference
 
-                if self.instance_on:
-                    mask_box_result = mask_box_result.to(mask_pred_result)
-                    height = new_size[0]/image_size[0]*height
-                    width = new_size[1]/image_size[1]*width
+                if self.instance_on:                               # True
+                    mask_box_result = mask_box_result.to(mask_pred_result) # mask_box_result : ([300,4])
+                    height = new_size[0]/image_size[0]*height              # 650.7738693467337
+                    width = new_size[1]/image_size[1]*width                # 428.0
                     mask_box_result = self.box_postprocess(mask_box_result, height, width)
 
                     instance_r = retry_if_cuda_oom(self.instance_inference)(mask_cls_result, mask_pred_result, mask_box_result)
                     processed_results[-1]["instances"] = instance_r
 
             return processed_results
+
+    def ov_inference(self, ov_model, batched_inputs):
+        images = [x["image"].to(self.device) for x in batched_inputs]
+        images = [(x - self.pixel_mean) / self.pixel_std for x in images]
+        images = ImageList.from_tensors(images, self.size_divisibility)
+        images_tensor = images.tensor
+
+        outputs = ov_model(images_tensor)
+
+        image_size = images_tensor.shape
+        mask_cls_results = torch.from_numpy(outputs[0])
+        mask_pred_results = torch.from_numpy(outputs[1])
+        mask_box_results = torch.from_numpy(outputs[2])
+        mask_pred_results = F.interpolate(
+            mask_pred_results,
+            size=(images.tensor.shape[-2], images.tensor.shape[-1]),
+            mode="bilinear",
+            align_corners=False,
+        )
+        processed_results = []
+        for mask_cls_result, mask_pred_result, mask_box_result, input_per_image, image_size in zip(
+                mask_cls_results, mask_pred_results, mask_box_results, batched_inputs, images.image_sizes
+        ):  # image_size is augmented size, not divisible to 32
+            
+            height = input_per_image.get("height", image_size[0])  # real size
+            width = input_per_image.get("width", image_size[1])
+            processed_results.append({})
+            new_size = mask_pred_result.shape[-2:]  # padded size (divisible to 32)
+
+
+            if self.sem_seg_postprocess_before_inference:
+                mask_pred_result = sem_seg_postprocess(
+                    mask_pred_result, image_size, height, width
+                )
+                mask_cls_result = mask_cls_result.to(mask_pred_result)
+                # mask_box_result = mask_box_result.to(mask_pred_result)
+                # mask_box_result = self.box_postprocess(mask_box_result, height, width)
+
+            # semantic segmentation inference
+            if self.semantic_on:
+                r = self.semantic_inference(mask_cls_result, mask_pred_result)
+                if not self.sem_seg_postprocess_before_inference:
+                    r = sem_seg_postprocess(r, image_size, height, width)
+                processed_results[-1]["sem_seg"] = r
+
+            # panoptic segmentation inference
+            if self.panoptic_on:
+                panoptic_r = self.panoptic_inference(mask_cls_result, mask_pred_result)
+                processed_results[-1]["panoptic_seg"] = panoptic_r
+
+            # instance segmentation inference
+
+            if self.instance_on:
+                mask_box_result = mask_box_result.to(mask_pred_result)
+                height = new_size[0]/image_size[0]*height
+                width = new_size[1]/image_size[1]*width
+                mask_box_result = self.box_postprocess(mask_box_result, height, width)
+
+                instance_r = self.instance_inference(mask_cls_result, mask_pred_result, mask_box_result)
+                processed_results[-1]["instances"] = instance_r
+        
+        return processed_results[0]
+
+    def forward_for_onnx(self, images_tensor: torch.Tensor):
+        """
+        ONNX-friendly forward function for export.
+        
+        Args:
+            images_tensor (torch.Tensor): 
+                Batched input images of shape [B, C, H, W], normalized (already subtracted mean and divided by std).
+                Must be padded to size divisible by `self.size_divisibility`.
+        
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+                - pred_logits: [B, num_queries, num_classes]
+                - pred_masks:  [B, num_queries, H_out, W_out]  (feature resolution, e.g., H/8, W/8)
+                - pred_boxes:  [B, num_queries, 4] (in cxcywh format, normalized to [0,1])
+        """
+        # 1. Backbone
+        features = self.backbone(images_tensor)
+
+        # 2. Semantic segmentation head (inference mode, no targets)
+        outputs, _ = self.sem_seg_head(features)
+
+        # 3. Return raw outputs (no post-processing, no resizing)
+        pred_logits = outputs["pred_logits"]
+        pred_masks = outputs["pred_masks"]
+        pred_boxes = outputs["pred_boxes"]
+        
+        return pred_logits, pred_masks, pred_boxes
+
+    def export_onnx(self, batched_inputs: torch.Tensor, onnx_path: str = "maskdino.onnx",
+                    input_shape: tuple = None, opset_version: int = 20):
+        """
+        Export the model to ONNX format.
+        Args:
+            batched_inputs (torch.Tensor): Input images in a batched format as expected by the model.
+            onnx_path (str): Path to save the exported ONNX file.
+            input_shape (tuple): Input shape (B, C, H, W) for export. If None, inferred automatically.
+            opset_version (int): ONNX opset version to use for export.
+        """
+        # Save original training state and DN (denoising) configuration.
+        # During export, the model must be in eval mode and DN should be disabled
+        # to avoid triggering training-specific branches (e.g., assertions requiring targets).
+        orig_training = self.training
+        orig_dn = None
+        # In some implementations, the predictor is located at sem_seg_head.predictor
+        try:
+            predictor = getattr(self.sem_seg_head, "predictor", None)
+            if predictor is not None and hasattr(predictor, "dn"):
+                orig_dn = predictor.dn
+        except Exception:
+            predictor = None
+
+        # Set model to eval mode and disable denoising (DN)
+        self.eval()
+        if predictor is not None and orig_dn is not None:
+            try:
+                predictor.dn = "no"
+            except Exception:
+                pass
+
+        # 1. Preprocess images: [H, W, C] (BGR) -> [C, H, W] and normalize to model input format
+        images = [x["image"].to(self.device) for x in batched_inputs]
+        images = [(x - self.pixel_mean) / self.pixel_std for x in images]
+        images = ImageList.from_tensors(images, self.size_divisibility)
+
+        # 2. Use a lightweight wrapper to avoid modifying the original forward interface
+        class _OnnxWrapper(nn.Module):
+            def __init__(self, model: "MaskDINO"):
+                super().__init__()
+                self.model = model
+
+            def forward(self, images_tensor: torch.Tensor):
+                return self.model.forward_for_onnx(images_tensor)
+
+        wrapper = _OnnxWrapper(self)
+
+        dummy_input = images.tensor
+        input_names = ["images"]
+        output_names = ["instances"]  # Unified output name
+        dynamic_axes = {
+            "images": {0: "batch_size", 2: "height", 3: "width"},
+            "instances": {0: "batch_size"}
+        }
+
+        torch.onnx.export(
+            wrapper,
+            dummy_input,
+            onnx_path,
+            export_params=True,
+            opset_version=16,  # Note: hardcoded to 16 despite function argument
+            do_constant_folding=True,
+            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
+            input_names=input_names,
+            output_names=output_names,
+            dynamic_axes=dynamic_axes,
+            verbose=False,
+            keep_initializers_as_inputs=False,
+        )
+
+        # Restore original model state
+        if predictor is not None and orig_dn is not None:
+            try:
+                predictor.dn = orig_dn
+            except Exception:
+                pass
+        if orig_training:
+            self.train()
+
+        print(f"[Info] Exported MaskDINO to ONNX: {onnx_path}")
+
+        # Optional: log size of initializers in the ONNX model
+        try:
+            import onnx
+            m = onnx.load(onnx_path)
+            init_bytes = 0
+            for init in m.graph.initializer:
+                # Estimate total bytes used by initializers (approximate)
+                from onnx import numpy_helper
+                arr = numpy_helper.to_array(init)
+                init_bytes += arr.nbytes
+            print(f"[Debug] ONNX initializers total bytes: {init_bytes}")
+        except Exception:
+            pass
+
+        print(f"[Info] Exported MaskDINO to ONNX: {onnx_path}")
 
     def prepare_targets(self, targets, images):
         h_pad, w_pad = images.tensor.shape[-2:]
