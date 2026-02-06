@@ -5,8 +5,12 @@ import bisect
 import multiprocessing as mp
 from collections import deque
 
+import time
 import cv2
 import torch
+
+import openvino as ov
+core = ov.Core()
 
 from detectron2.data import MetadataCatalog
 from detectron2.engine.defaults import DefaultPredictor
@@ -15,7 +19,7 @@ from detectron2.utils.visualizer import ColorMode, Visualizer
 
 
 class VisualizationDemo(object):
-    def __init__(self, cfg, instance_mode=ColorMode.IMAGE, parallel=False):
+    def __init__(self, cfg, instance_mode=ColorMode.IMAGE, parallel=False, ov_infer=False, ov_device="CPU"):
         """
         Args:
             cfg (CfgNode):
@@ -30,11 +34,25 @@ class VisualizationDemo(object):
         self.instance_mode = instance_mode
 
         self.parallel = parallel
+
+        if ov_infer:
+            # ov_model_path = cfg.MODEL.OV_MODEL.OV_MODEL_PATH if cfg.MODEL.OV_MODEL.OV_MODEL_PATH is not None else "./maskdino.xml"
+            # ov_device = cfg.MODEL.OV_MODEL.OV_DEVICE if cfg.MODEL.OV_MODEL.OV_DEVICE is not None else "CPU"
+            ov_model_path = "./maskdino.xml"
+            ov_device = ov_device
+            self.ov_model = core.compile_model(ov_model_path, ov_device)
         if parallel:
             num_gpu = torch.cuda.device_count()
             self.predictor = AsyncPredictor(cfg, num_gpus=num_gpu)
         else:
             self.predictor = DefaultPredictor(cfg)
+
+    def export_onnx(self, image):
+        if self.parallel:
+            print("[Debug] parallel model can't support onnx export")
+        else:
+            self.predictor.export_onnx(image, onnx_path="maskdino.onnx")
+            print("[Debug] onnx export done")
 
     def run_on_image(self, image):
         """
@@ -63,7 +81,38 @@ class VisualizationDemo(object):
             if "instances" in predictions:
                 instances = predictions["instances"].to(self.cpu_device)
                 vis_output = visualizer.draw_instance_predictions(predictions=instances)
+        
+        return predictions, vis_output
 
+    def ov_run_on_image(self, image):
+        """
+        OpenVINO backend inferernce
+        """
+        vis_output = None
+        start_time = time.time()
+        predictions = self.predictor.ov_inference(self.ov_model, image)
+        end_time = time.time()
+        print(f"[Info] OV Inference time: {(end_time - start_time)*1000:.2f} ms")
+        
+        # Convert image from OpenCV BGR format to Matplotlib RGB format.
+        start_time = time.time()
+        image = image[:, :, ::-1]
+        visualizer = Visualizer(image, self.metadata, instance_mode=self.instance_mode)
+        if "panoptic_seg" in predictions:
+            panoptic_seg, segments_info = predictions["panoptic_seg"]
+            vis_output = visualizer.draw_panoptic_seg_predictions(
+                panoptic_seg.to(self.cpu_device), segments_info
+            )
+        else:
+            if "sem_seg" in predictions:
+                vis_output = visualizer.draw_sem_seg(
+                    predictions["sem_seg"].argmax(dim=0).to(self.cpu_device)
+                )
+            if "instances" in predictions:
+                instances = predictions["instances"].to(self.cpu_device)
+                vis_output = visualizer.draw_instance_predictions(predictions=instances)
+        end_time = time.time()
+        print(f"[Info] OV Postprocess + Visualization time: {(end_time - start_time)*1000:.2f} ms")
         return predictions, vis_output
 
     def _frame_from_video(self, video):
