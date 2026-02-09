@@ -13,7 +13,31 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.nn.init import xavier_uniform_, constant_, uniform_, normal_
-from torch.cuda.amp import autocast
+try:
+    from torch.cuda.amp import autocast
+except Exception:
+    # Define a no-op autocast that can be used as a context manager or decorator
+    from contextlib import ContextDecorator
+
+    class _DummyAutocast(ContextDecorator):
+        def __init__(self, enabled=True):
+            self.enabled = enabled
+
+        def __enter__(self):
+            return None
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def __call__(self, fn):
+            def wrapper(*args, **kwargs):
+                with self:
+                    return fn(*args, **kwargs)
+
+            return wrapper
+
+    def autocast(enabled=True):
+        return _DummyAutocast(enabled=enabled)
 
 from detectron2.config import configurable
 from detectron2.layers import Conv2d, ShapeSpec, get_norm

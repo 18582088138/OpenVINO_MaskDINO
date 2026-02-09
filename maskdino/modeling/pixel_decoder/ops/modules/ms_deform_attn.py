@@ -15,14 +15,25 @@ from __future__ import division
 
 import warnings
 import math
+import logging
 
 import torch
 from torch import nn
 import torch.nn.functional as F
 from torch.nn.init import xavier_uniform_, constant_
 
-from ..functions import MSDeformAttnFunction
+# Prefer CUDA implementation when available; fall back to the PyTorch core implementation.
 from ..functions.ms_deform_attn_func import ms_deform_attn_core_pytorch
+try:
+    # Some repositories expose a CUDA-accelerated function with a different name.
+    # Try to import a CUDA-backed function if provided by the extension module.
+    from ..functions.ms_deform_attn_func import ms_deform_attn_core_cuda  # type: ignore
+    _has_cuda_ext = True
+except Exception:
+    ms_deform_attn_core_cuda = None  # type: ignore
+    _has_cuda_ext = False
+
+_logger = logging.getLogger(__name__)
 
 
 def _is_power_of_2(n):
@@ -113,13 +124,21 @@ class MSDeformAttn(nn.Module):
         else:
             raise ValueError(
                 'Last dim of reference_points must be 2 or 4, but get {} instead.'.format(reference_points.shape[-1]))
-        # try:
-        #     output = MSDeformAttnFunction.apply(
-        #         value, input_spatial_shapes, input_level_start_index, sampling_locations, attention_weights, self.im2col_step)
-        # except:
-        #     # CPU
-        #     output = ms_deform_attn_core_pytorch(value, input_spatial_shapes, sampling_locations, attention_weights)
-        # # For FLOPs calculation only
-        output = ms_deform_attn_core_pytorch(value, input_spatial_shapes, sampling_locations, attention_weights)
+        # Prefer CUDA accelerated implementation when available and input is on CUDA device.
+        use_cuda_impl = False
+        if ms_deform_attn_core_cuda is not None and input_flatten.is_cuda:
+            # Also check that the extension was built/loaded successfully.
+            use_cuda_impl = True
+
+        if use_cuda_impl:
+            try:
+                output = ms_deform_attn_core_cuda(value, input_spatial_shapes, input_level_start_index, sampling_locations, attention_weights, self.im2col_step)
+            except Exception:
+                # If CUDA implementation fails for any reason, fall back to the PyTorch core
+                _logger.warning("ms_deform_attn: CUDA kernel failed, falling back to PyTorch implementation.")
+                output = ms_deform_attn_core_pytorch(value, input_spatial_shapes, sampling_locations, attention_weights)
+        else:
+            # CPU / PyTorch fallback
+            output = ms_deform_attn_core_pytorch(value, input_spatial_shapes, sampling_locations, attention_weights)
         output = self.output_proj(output)
         return output
