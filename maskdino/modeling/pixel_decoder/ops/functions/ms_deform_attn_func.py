@@ -20,44 +20,62 @@ from torch.autograd.function import once_differentiable
 
 try:
     import MultiScaleDeformableAttention as MSDA
-except ModuleNotFoundError as e:
+    _has_msda = True
+except ModuleNotFoundError:
+    # If the CUDA extension is not available, fall back to the pure-PyTorch implementation below.
+    MSDA = None
+    _has_msda = False
     info_string = (
-        "\n\nPlease compile MultiScaleDeformableAttention CUDA op with the following commands:\n"
-        "\t`cd maskdino/modeling/pixel_decoder/ops`\n"
-        "\t`sh make.sh`\n"
+        "\nMultiScaleDeformableAttention CUDA op was not found. Falling back to the pure-PyTorch implementation.\n"
+        "To enable the CUDA-accelerated op, compile it with:\n"
+        "\tcd maskdino/modeling/pixel_decoder/ops\n"
+        "\tsh make.sh\n"
     )
-    raise ModuleNotFoundError(info_string)
+    import warnings
+
+    warnings.warn(info_string)
 
 
-class MSDeformAttnFunction(Function):
-    @staticmethod
-    def symbolic(g, value, value_spatial_shapes, value_level_start_index, sampling_locations, attention_weights, im2col_step):
-        return g.op("MSDeformAttnFunction", 
-                    value, 
-                    value_spatial_shapes, 
-                    value_level_start_index, 
-                    sampling_locations, 
-                    attention_weights, 
-                    im2col_step=im2col_step,
-                    outputs=1)  # Specify the number of outputs if needed
+if _has_msda:
+    class MSDeformAttnFunction(Function):
+        @staticmethod
+        def symbolic(g, value, value_spatial_shapes, value_level_start_index, sampling_locations, attention_weights, im2col_step):
+            return g.op("MSDeformAttnFunction", 
+                        value, 
+                        value_spatial_shapes, 
+                        value_level_start_index, 
+                        sampling_locations, 
+                        attention_weights, 
+                        im2col_step=im2col_step,
+                        outputs=1)  # Specify the number of outputs if needed
 
-    @staticmethod
-    def forward(ctx, value, value_spatial_shapes, value_level_start_index, sampling_locations, attention_weights, im2col_step):
-        ctx.im2col_step = im2col_step
-        output = MSDA.ms_deform_attn_forward(
-            value, value_spatial_shapes, value_level_start_index, sampling_locations, attention_weights, ctx.im2col_step)
-        ctx.save_for_backward(value, value_spatial_shapes, value_level_start_index, sampling_locations, attention_weights)
-        return output
+        @staticmethod
+        def forward(ctx, value, value_spatial_shapes, value_level_start_index, sampling_locations, attention_weights, im2col_step):
+            ctx.im2col_step = im2col_step
+            output = MSDA.ms_deform_attn_forward(
+                value, value_spatial_shapes, value_level_start_index, sampling_locations, attention_weights, ctx.im2col_step)
+            ctx.save_for_backward(value, value_spatial_shapes, value_level_start_index, sampling_locations, attention_weights)
+            return output
 
-    @staticmethod
-    @once_differentiable
-    def backward(ctx, grad_output):
-        value, value_spatial_shapes, value_level_start_index, sampling_locations, attention_weights = ctx.saved_tensors
-        grad_value, grad_sampling_loc, grad_attn_weight = \
-            MSDA.ms_deform_attn_backward(
-                value, value_spatial_shapes, value_level_start_index, sampling_locations, attention_weights, grad_output, ctx.im2col_step)
+        @staticmethod
+        @once_differentiable
+        def backward(ctx, grad_output):
+            value, value_spatial_shapes, value_level_start_index, sampling_locations, attention_weights = ctx.saved_tensors
+            grad_value, grad_sampling_loc, grad_attn_weight = \
+                MSDA.ms_deform_attn_backward(
+                    value, value_spatial_shapes, value_level_start_index, sampling_locations, attention_weights, grad_output, ctx.im2col_step)
 
-        return grad_value, None, None, grad_sampling_loc, grad_attn_weight, None
+            return grad_value, None, None, grad_sampling_loc, grad_attn_weight, None
+else:
+    # Provide a lightweight compatible interface when CUDA op is not available.
+    # We implement a plain Python `apply` that calls the PyTorch fallback. Autograd
+    # will track the operations performed in `ms_deform_attn_core_pytorch`, so
+    # gradients work correctly without needing a custom backward implementation.
+    class MSDeformAttnFunction(object):
+        @staticmethod
+        def apply(value, value_spatial_shapes, value_level_start_index, sampling_locations, attention_weights, im2col_step=None):
+            # ms_deform_attn_core_pytorch signature does not accept im2col_step.
+            return ms_deform_attn_core_pytorch(value, value_spatial_shapes, sampling_locations, attention_weights)
 
 
 def ms_deform_attn_core_pytorch(value, value_spatial_shapes, sampling_locations, attention_weights):

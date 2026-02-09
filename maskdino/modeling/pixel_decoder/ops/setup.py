@@ -48,13 +48,21 @@ def get_extensions():
             "-D__CUDA_NO_HALF2_OPERATORS__",
         ]
     else:
+        # No CUDA: don't fail the setup script — just skip building CUDA extensions.
+        import warnings
         if CUDA_HOME is None:
-            raise NotImplementedError('CUDA_HOME is None. Please set environment variable CUDA_HOME.')
+            warnings.warn('CUDA_HOME is None. CUDA extensions will not be built. Proceeding without CUDA.')
         else:
-            raise NotImplementedError('No CUDA runtime is found. Please set FORCE_CUDA=1 or test it by running torch.cuda.is_available().')
+            warnings.warn('No CUDA runtime is found. CUDA extensions will not be built. Proceeding without CUDA.')
+        # Keep sources as CPU-only
+        extension = CppExtension
 
     sources = [os.path.join(extensions_dir, s) for s in sources]
     include_dirs = [extensions_dir]
+    # If CUDA is not enabled, return an empty list so installation continues.
+    if not (os.environ.get('FORCE_CUDA') or torch.cuda.is_available()) or CUDA_HOME is None:
+        return []
+
     ext_modules = [
         extension(
             "MultiScaleDeformableAttention",

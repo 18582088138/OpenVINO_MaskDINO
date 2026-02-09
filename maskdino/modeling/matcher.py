@@ -12,7 +12,30 @@ import torch
 import torch.nn.functional as F
 from scipy.optimize import linear_sum_assignment
 from torch import nn
-from torch.cuda.amp import autocast
+try:
+    from torch.cuda.amp import autocast
+except Exception:
+    from contextlib import ContextDecorator
+
+    class _DummyAutocast(ContextDecorator):
+        def __init__(self, enabled=True):
+            self.enabled = enabled
+
+        def __enter__(self):
+            return None
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def __call__(self, fn):
+            def wrapper(*args, **kwargs):
+                with self:
+                    return fn(*args, **kwargs)
+
+            return wrapper
+
+    def autocast(enabled=True):
+        return _DummyAutocast(enabled=enabled)
 
 from detectron2.projects.point_rend.point_features import point_sample
 from maskdino.utils.box_ops import generalized_box_iou,box_cxcywh_to_xyxy

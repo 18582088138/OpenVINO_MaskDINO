@@ -11,6 +11,7 @@ MaskFormer criterion.
 import logging
 
 import torch
+from ..utils.device import get_device
 import torch.nn.functional as F
 from torch import nn
 
@@ -346,13 +347,13 @@ class SetCriterion(nn.Module):
             exc_idx = []
             for i in range(len(targets)):
                 if len(targets[i]['labels']) > 0:
-                    t = torch.arange(0, len(targets[i]['labels'])).long().cuda()
+                    t = torch.arange(0, len(targets[i]['labels'])).long().to(get_device())
                     t = t.unsqueeze(0).repeat(scalar, 1)
                     tgt_idx = t.flatten()
-                    output_idx = (torch.tensor(range(scalar)) * single_pad).long().cuda().unsqueeze(1) + t
+                    output_idx = (torch.tensor(range(scalar)) * single_pad).long().to(get_device()).unsqueeze(1) + t
                     output_idx = output_idx.flatten()
                 else:
-                    output_idx = tgt_idx = torch.tensor([]).long().cuda()
+                    output_idx = tgt_idx = torch.tensor([]).long().to(get_device())
                 exc_idx.append((output_idx, tgt_idx))
         indices = self.matcher(outputs_without_aux, targets)
         # Compute the average number of target boxes accross all nodes, for normalization purposes
@@ -377,12 +378,12 @@ class SetCriterion(nn.Module):
             losses.update(l_dict)
         elif self.dn != "no":
             l_dict = dict()
-            l_dict['loss_bbox_dn'] = torch.as_tensor(0.).to('cuda')
-            l_dict['loss_giou_dn'] = torch.as_tensor(0.).to('cuda')
-            l_dict['loss_ce_dn'] = torch.as_tensor(0.).to('cuda')
+            l_dict['loss_bbox_dn'] = torch.as_tensor(0.).to(get_device())
+            l_dict['loss_giou_dn'] = torch.as_tensor(0.).to(get_device())
+            l_dict['loss_ce_dn'] = torch.as_tensor(0.).to(get_device())
             if self.dn == "seg":
-                l_dict['loss_mask_dn'] = torch.as_tensor(0.).to('cuda')
-                l_dict['loss_dice_dn'] = torch.as_tensor(0.).to('cuda')
+                l_dict['loss_mask_dn'] = torch.as_tensor(0.).to(get_device())
+                l_dict['loss_dice_dn'] = torch.as_tensor(0.).to(get_device())
             losses.update(l_dict)
 
         # In case of auxiliary losses, we repeat this process with the output of each intermediate layer.
@@ -408,12 +409,12 @@ class SetCriterion(nn.Module):
                         losses.update(l_dict)
                     elif self.dn != "no":
                         l_dict = dict()
-                        l_dict[f'loss_bbox_dn_{i}'] = torch.as_tensor(0.).to('cuda')
-                        l_dict[f'loss_giou_dn_{i}'] = torch.as_tensor(0.).to('cuda')
-                        l_dict[f'loss_ce_dn_{i}'] = torch.as_tensor(0.).to('cuda')
+                        l_dict[f'loss_bbox_dn_{i}'] = torch.as_tensor(0.).to(get_device())
+                        l_dict[f'loss_giou_dn_{i}'] = torch.as_tensor(0.).to(get_device())
+                        l_dict[f'loss_ce_dn_{i}'] = torch.as_tensor(0.).to(get_device())
                         if self.dn == "seg":
-                            l_dict[f'loss_mask_dn_{i}'] = torch.as_tensor(0.).to('cuda')
-                            l_dict[f'loss_dice_dn_{i}'] = torch.as_tensor(0.).to('cuda')
+                            l_dict[f'loss_mask_dn_{i}'] = torch.as_tensor(0.).to(get_device())
+                            l_dict[f'loss_dice_dn_{i}'] = torch.as_tensor(0.).to(get_device())
                         losses.update(l_dict)
         # interm_outputs loss
         if 'interm_outputs' in outputs:

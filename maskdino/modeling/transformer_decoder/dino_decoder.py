@@ -9,7 +9,30 @@
 from typing import Optional, List, Union
 import torch
 from torch import nn, Tensor
-from torch.cuda.amp import autocast
+try:
+    from torch.cuda.amp import autocast
+except Exception:
+    from contextlib import ContextDecorator
+
+    class _DummyAutocast(ContextDecorator):
+        def __init__(self, enabled=True):
+            self.enabled = enabled
+
+        def __enter__(self):
+            return None
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def __call__(self, fn):
+            def wrapper(*args, **kwargs):
+                with self:
+                    return fn(*args, **kwargs)
+
+            return wrapper
+
+    def autocast(enabled=True):
+        return _DummyAutocast(enabled=enabled)
 
 from ...utils.utils import MLP, _get_clones, _get_activation_fn, gen_sineembed_for_position, inverse_sigmoid
 from ..pixel_decoder.ops.modules import MSDeformAttn
