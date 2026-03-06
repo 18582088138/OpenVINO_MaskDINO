@@ -7,6 +7,7 @@ submitit
 scikit-image
 opencv-python
 
-torch>=2.0
+onnxscript
+torch>=2.0, <=2.8.0
 torchvision
 openvino
