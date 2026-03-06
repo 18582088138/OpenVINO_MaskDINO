@@ -153,11 +153,14 @@ if __name__ == "__main__":
         for path in tqdm.tqdm(args.input, disable=not args.output):
             # use PIL, to be consistent with evaluation
             img = read_image(path, format="BGR")
+            orig_h, orig_w = img.shape[:2]
             print("[Debug] input img shape:", img.shape)
             start_time = time.time()
+            did_resize = False
             if ov_infer:
                 # For OpenVINO inference (static shape), resize image to 512x512 as the model is exported with this input size
                 img = cv2.resize(img, (512, 512), interpolation=cv2.INTER_LINEAR)
+                did_resize = True
                 predictions, visualized_output = demo.ov_run_on_image(img)
             else:
                 predictions, visualized_output = demo.run_on_image(img)
@@ -171,6 +174,16 @@ if __name__ == "__main__":
                 )
             )
 
+            if visualized_output is None:
+                # Nothing to show/save
+                continue
+
+            # If we resized the image for inference, scale visualization back to original size
+            vis_img_rgb = visualized_output.get_image()  # RGB
+            vis_img_bgr = vis_img_rgb[:, :, ::-1]
+            if did_resize:
+                vis_img_bgr = cv2.resize(vis_img_bgr, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
+
             if args.output:
                 if os.path.isdir(args.output):
                     assert os.path.isdir(args.output), args.output
@@ -178,10 +191,11 @@ if __name__ == "__main__":
                 else:
                     assert len(args.input) == 1, "Please specify a directory with args.output"
                     out_filename = args.output
-                visualized_output.save(out_filename)
+                # Save BGR image using OpenCV
+                cv2.imwrite(out_filename, vis_img_bgr)
             else:
                 cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
-                cv2.imshow(WINDOW_NAME, visualized_output.get_image()[:, :, ::-1])
+                cv2.imshow(WINDOW_NAME, vis_img_bgr)
                 if cv2.waitKey(0) == 27:
                     break  # esc to quit
     elif args.webcam:
