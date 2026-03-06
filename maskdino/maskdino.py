@@ -489,7 +489,7 @@ class MaskDINO(nn.Module):
             operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
             input_names=input_names,
             output_names=output_names,
-            dynamic_axes=dynamic_axes,
+            # dynamic_axes=dynamic_axes,
             verbose=False,
             keep_initializers_as_inputs=False,
         )

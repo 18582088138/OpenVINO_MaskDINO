@@ -38,6 +38,7 @@ def setup_cfg(args):
     add_maskdino_config(cfg)
     cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)
+    cfg.INPUT.MIN_SIZE_TEST=512
     cfg.freeze()
     return cfg
 
@@ -141,6 +142,8 @@ if __name__ == "__main__":
         input = glob.glob(os.path.expanduser(args.input[0]))
         tmp_img = read_image(input[0],format="BGR")
         tmp_demo = VisualizationDemo(cfg)
+        # For ONNX export, resize image to 512x512
+        tmp_img = cv2.resize(tmp_img, (512, 512), interpolation=cv2.INTER_LINEAR)
         tmp_demo.export_onnx(tmp_img)
 
     if args.input:
@@ -153,6 +156,8 @@ if __name__ == "__main__":
             print("[Debug] input img shape:", img.shape)
             start_time = time.time()
             if ov_infer:
+                # For OpenVINO inference (static shape), resize image to 512x512 as the model is exported with this input size
+                img = cv2.resize(img, (512, 512), interpolation=cv2.INTER_LINEAR)
                 predictions, visualized_output = demo.ov_run_on_image(img)
             else:
                 predictions, visualized_output = demo.run_on_image(img)
